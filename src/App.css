@@ -17,7 +17,7 @@ h1 {
   padding: 1.5rem;
   display: flex;
   flex-wrap: wrap;
-  gap: 1.5rem;
+  gap: 1rem 1.25rem;
   align-items: flex-start;
 }
 
@@ -26,8 +26,18 @@ figure {
   max-width: 100%;
 }
 
+/* One line per caption: at thumbnail width a component name wraps to four. */
+figcaption .name {
+  flex: 1;
+  /* A flex item will not shrink below its content without this. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 figcaption small {
-  margin-left: auto;
+  flex: none;
   font-family: var(--mono);
   font-size: 0.7rem;
   opacity: 0.6;
@@ -35,9 +45,10 @@ figcaption small {
 
 figcaption {
   display: flex;
-  flex-wrap: wrap;
+  /* One line: at thumbnail width the name and size would otherwise stack. */
+  flex-wrap: nowrap;
   gap: 0.5rem;
-  align-items: center;
+  align-items: baseline;
   padding-bottom: 0.4rem;
   font-size: 0.85rem;
   opacity: 0.7;
@@ -47,6 +58,10 @@ figcaption {
 .tile {
   position: relative;
   overflow: hidden;
+  /* The components are designed for a light page and the preview document is
+     transparent, so the tile supplies the backdrop they expect. Without it
+     dark text sits on this app's dark background and cannot be read. */
+  background: #fff;
   border: 1px solid var(--border);
   border-radius: 8px;
 }

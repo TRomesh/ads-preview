@@ -2,96 +2,111 @@ import { useEffect, useRef, useState } from 'react'
 import {
   isPreviewMessage,
   isValidDimensions,
+  PREVIEW_MESSAGE_PREFIX,
   PreviewMessageType,
   type PreviewDimensions,
 } from './protocol'
 
-// Give up after this, so a preview that never speaks does not hang a tile.
+// How long to wait before deciding a preview is never going to answer.
+// A site that does not use the SDK sends nothing, and must not hang the tile.
 const MEASURE_TIMEOUT = 4000
 
-// Stop reacting after this many resizes, so an animating component settles.
-const MAX_RESCALES = 5
+// A component that animates could report a new size forever. After this many
+// updates, stop listening to it and keep the last size it gave.
+const MAX_UPDATES = 5
 
-// Shape assumed until a preview reports, and for previews that never do.
-const FALLBACK_ASPECT = 16 / 9
-
-export type PreviewState = {
-  dimensions: PreviewDimensions
-  // False until the preview reports, or until it times out.
-  measured: boolean
-  // The preview said it could not render.
-  error?: string
-  // Nothing arrived in time — probably not an SDK preview.
-  timedOut: boolean
+// Logs only while developing. A tile that stays blank is otherwise a mystery.
+const log = (...args: unknown[]) => {
+  if (import.meta.env.DEV) console.debug('[preview]', ...args)
 }
 
-// Listens to one preview iframe and reports what it says about its size.
-// Nothing here resizes the frame: the caller scales with a CSS transform, so a
-// component cannot reflow from being scaled and re-report forever.
-// A different reference width is a different preview — remount, do not update.
+export type PreviewState = {
+  /** The component's size, once it has said. Undefined until then. */
+  dimensions?: PreviewDimensions
+  /** The preview could not render this component. */
+  error?: string
+  /** Nothing arrived in time. Probably a site that does not use the SDK. */
+  timedOut: boolean
+  /** Put this on the iframe. It starts the timeout. */
+  onLoad: () => void
+}
+
+/**
+ * Listens to one preview iframe.
+ *
+ * You do not need this to lay the tile out: the preview fits itself to its own
+ * frame, so a fixed frame scaled by a constant is enough. What you get here is
+ * the component's size for display, plus the two things worth reacting to —
+ * it failed, or it never answered.
+ */
 export function usePreview(
   frame: React.RefObject<HTMLIFrameElement | null>,
-  { origin, referenceWidth }: { origin: string; referenceWidth: number },
-) {
-  const [state, setState] = useState<PreviewState>(() => ({
-    dimensions: {
-      width: referenceWidth,
-      height: Math.round(referenceWidth / FALLBACK_ASPECT),
-      offsetX: 0,
-      offsetY: 0,
-      viewportWidth: referenceWidth,
-      element: '',
-    },
-    measured: false,
+  { origin }: { origin: string },
+): PreviewState {
+  const [state, setState] = useState<Omit<PreviewState, 'onLoad'>>({
     timedOut: false,
-  }))
+  })
 
-  // Counted across the preview's life, not per render.
-  const rescales = useRef(0)
+  // Counted for the life of the preview, not per render.
+  const updates = useRef(0)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
-  // Started on `load`, not on mount: a lazy tile below the fold has not been
-  // fetched yet and would otherwise time out while waiting its turn.
+  // Started when the iframe loads, not when the tile mounts: a lazy iframe
+  // below the fold is not fetched until you scroll to it, and would otherwise
+  // be declared dead while it is simply waiting its turn.
   const onLoad = () => {
     clearTimeout(timer.current)
-    timer.current = setTimeout(
-      () =>
-        setState(current => (current.measured ? current : { ...current, timedOut: true })),
-      MEASURE_TIMEOUT,
-    )
+    timer.current = setTimeout(() => {
+      log('nothing reported after', MEASURE_TIMEOUT, 'ms')
+      setState(current =>
+        current.dimensions ? current : { ...current, timedOut: true },
+      )
+    }, MEASURE_TIMEOUT)
   }
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
-      // Origin says which site; source says which frame. Both, not either.
-      if (event.origin !== origin) return
-      if (event.source !== frame.current?.contentWindow) return
+      // Every library shares this channel, so ignore anything not ours.
       if (!isPreviewMessage(event.data)) return
+
+      // Ours, but from another tile's iframe. Each tile sees every message,
+      // so this is normal and not worth logging.
+      if (event.source !== frame.current?.contentWindow) return
+
+      // Ours, claiming to be this iframe, but from an unexpected site.
+      if (event.origin !== origin) {
+        log('rejected: from', event.origin, 'expected', origin)
+        return
+      }
 
       const message = event.data
 
       if (message.type === PreviewMessageType.error) {
         clearTimeout(timer.current)
-        // Untrusted text: kept as a string, rendered as text, never markup.
-        setState(current => ({ ...current, error: String(message.payload?.message ?? '') }))
+        log('error', message.payload?.code)
+        // Untrusted text. Keep it a string and render it as text, never HTML.
+        setState({ error: String(message.payload?.message ?? ''), timedOut: false })
         return
       }
 
-      // Past the cap, keep the last good size rather than following the frame.
+      // A size change after the first report. Stop following it eventually.
       if (message.type === PreviewMessageType.resize) {
-        if (rescales.current >= MAX_RESCALES) return
-        rescales.current++
+        if (updates.current >= MAX_UPDATES) return
+        updates.current++
       }
 
-      if (!isValidDimensions(message.payload)) return
+      // Never trust the numbers: a broken component can report anything.
+      if (!isValidDimensions(message.payload)) {
+        log('rejected: bad size', message.payload)
+        return
+      }
+
+      const { width, height, contentType } = message.payload
+      const kind = message.type.replace(PREVIEW_MESSAGE_PREFIX, '')
+      log(`${kind} ${contentType} ${width}×${height}`)
 
       clearTimeout(timer.current)
-      setState({
-        dimensions: message.payload,
-        measured: true,
-        timedOut: false,
-        error: undefined,
-      })
+      setState({ dimensions: message.payload, timedOut: false })
     }
 
     window.addEventListener('message', onMessage)

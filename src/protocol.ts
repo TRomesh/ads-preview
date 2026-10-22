@@ -4,6 +4,9 @@
 
 const PREFIX = 'optimizely:preview:'
 
+// Exported so a caller can strip it when logging a message type.
+export const PREVIEW_MESSAGE_PREFIX = PREFIX
+
 // Past any real component, short of breaking layout arithmetic.
 const MAX_DIMENSION = 20000
 

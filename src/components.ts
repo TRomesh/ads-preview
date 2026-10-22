@@ -1,7 +1,8 @@
 // The site that renders the components.
 export const origin = import.meta.env.VITE_PREVIEW_ORIGIN ?? 'https://localhost:3000'
 
-// What to show in one frame.
+// One tile: which component, and optionally which display template and
+// settings to render it with.
 export type Selection = {
   /** Content type key, as the site registers it. */
   contentType: string
@@ -18,8 +19,11 @@ export function previewUrl({ contentType, displayTemplate, settings }: Selection
   return `${origin}/preview/component?${params}`
 }
 
-// One entry per choice, so the variants sit side by side. Name the template:
-// that applies its tag and the defaults for its other settings, as the CMS does.
+// One entry per choice, so a component's variants sit side by side.
+//
+// Name the display template, not just the setting: that applies the
+// template's tag and the defaults for its other settings, which is what the
+// CMS does. A bare setting on its own only overrides that one value.
 function variants(
   base: Selection,
   setting: string,
@@ -31,8 +35,13 @@ function variants(
   }))
 }
 
-// Stands in for the list the CMS holds after `config push`, so it is kept in
-// step by hand the same way. These are the elements an editor can place.
+// What to show. Stands in for the list the CMS already holds after
+// `config push`, and is kept in step by hand the same way.
+//
+// These keys are from the Stride template. For Alloy, use: Teaser, Notice,
+// Button, Editorial, Article, Contact, NewsEventsList — with the
+// TeaserDisplayTemplate (orientation) and NoticeDisplayTemplate (color).
+
 export const components: Selection[] = [
   { contentType: 'HeadingElement' },
   { contentType: 'RichTextElement' },
@@ -69,3 +78,4 @@ export const components: Selection[] = [
   { contentType: 'OptiFormsSubmitElement' },
   { contentType: 'OptiFormsResetElement' },
 ]
+

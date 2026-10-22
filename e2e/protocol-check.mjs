@@ -6,8 +6,8 @@
  * properties the design rests on.
  *
  *   1. A preview reports its *component's* box, not the page's. Components
- *      differ in size, and one narrower than the 1280px viewport proves the
- *      measurement is of the component rather than the wrapper around it.
+ *      differ in size, and one narrower than the frame proves the measurement
+ *      is of the component rather than the wrapper around it.
  *   2. Nothing keeps talking. After the previews settle, no further protocol
  *      messages arrive — the parent scales with a CSS transform, so a
  *      component cannot reflow from being scaled and re-report forever.
@@ -66,7 +66,17 @@ await send('Page.enable');
 await send('Runtime.enable');
 await send('Security.setIgnoreCertificateErrors', { ignore: true });
 await send('Page.navigate', { url: APP_URL });
-await wait(12000);
+await wait(8000);
+
+// Tiles are lazily loaded, so walk the page to make them all fetch. Without
+// this only the first rows measure, and those happen to be the widest
+// components — which would make the "component, not wrapper" check vacuous.
+for (let step = 0; step < 8; step++) {
+  await evaluate('scrollBy(0, innerHeight); true');
+  await wait(1500);
+}
+await evaluate('scrollTo(0, 0); true');
+await wait(4000);
 
 const failures = [];
 
@@ -92,10 +102,15 @@ if (boxes.length === 0) {
 }
 
 // The wrapper around a component is full-width, so a component narrower than
-// the viewport is the proof that the component itself is being measured.
-if (boxes.length > 0 && !boxes.some(box => box.width < 1280)) {
+// the frame is the proof that the component itself is being measured. Read the
+// frame's own width rather than assuming one: it is a tuning knob.
+const layoutWidth = Number(
+  await evaluate(`document.querySelector('.tile iframe')?.getAttribute('width')`),
+);
+
+if (boxes.length > 0 && !boxes.some(box => box.width < layoutWidth)) {
   failures.push(
-    `Every preview reported the full viewport width, so the wrapper is being measured: ${JSON.stringify(boxes)}`,
+    `Every preview reported the full ${layoutWidth}px frame width, so the wrapper is being measured: ${JSON.stringify(boxes)}`,
   );
 }
 

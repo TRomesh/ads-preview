@@ -95,7 +95,7 @@ the page, a button is 257×48. So the preview measures itself and tells you.
 ```text
   YOUR PAGE                               THE SITE'S PREVIEW ROUTE
   ─────────                               ────────────────────────
-  iframe width=1280 height=720 ── GET ──▶ render the component alone
+  iframe 320 × 1600 ───── GET ─────────▶ render the component alone
        │                                  wait for fonts and images
        │                                  measure the component's box
        │                                          │
@@ -108,8 +108,23 @@ the page, a button is 257×48. So the preview measures itself and tells you.
 ```
 
 `width`/`height` are the **component's** box, not the page's. `offsetX`/`offsetY` say
-where it sits inside the 1280×720 page, so you can move it into the corner of your tile
-before scaling — otherwise you frame the empty space around it.
+where it sits inside the page, so you can move it into the corner of your tile before
+scaling — otherwise you frame the empty space around it.
+
+**Make the frame tall enough.** A frame cannot show content past its own height, so a
+component taller than the frame is cropped however you scale it — and if you size the
+tile from the reported height, the extra becomes empty space the frame cannot fill. 1600
+contains the cards in this set; clamp the fit to the frame height for anything taller.
+
+**The frame's width decides how readable the text is.** Text is scaled by
+`tileWidth / layoutWidth`, so a component laid out at 1280 shrinks 7.5× into a 171px tile
+and 36px type lands at 5px — you see shape, not words. At 320 the shrink is 0.54 and the
+text reads properly, at the cost of components rendering their narrow layout. Pick
+whichever matters more; it is one constant.
+
+**Give the tile a background.** The preview document is transparent, and components are
+usually designed for a light page. Without `background: #fff` on the tile, dark text sits
+on your own background and disappears.
 
 ### The one rule
 
@@ -131,8 +146,8 @@ a fixed desktop preview is about forty lines:
 ```tsx
 import { useEffect, useRef, useState } from 'react'
 
-const LAYOUT_WIDTH = 1280   // never changes
-const LAYOUT_HEIGHT = 720
+const LAYOUT_WIDTH = 320     // never changes
+const LAYOUT_HEIGHT = 1600   // tall enough to contain a card in full
 const SITE = 'https://site.example.com'
 
 function PreviewTile({ contentType, tileWidth }: { contentType: string; tileWidth: number }) {
@@ -201,8 +216,8 @@ ever remounts — the only thing that would have forced it is a change of layout
 Two numbers, both constants:
 
 ```text
-LAYOUT  1280 × 720   the viewport the component is laid out and measured in. Never changes.
-TILE     240 × 135   your thumbnail. Also never changes.
+LAYOUT   320 × 1600  the viewport the component is laid out and measured in. Never changes.
+TILE     171 × 96    your thumbnail. Also never changes.
 ```
 
 Fit the reported box inside the tile and centre it:

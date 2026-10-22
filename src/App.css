@@ -1,0 +1,121 @@
+header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.viewports {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.toggle-label {
+  padding-right: 0.25rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.5;
+}
+
+.viewports button {
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-size: 0.85rem;
+  text-transform: capitalize;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.viewports button[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+}
+
+.viewports small {
+  opacity: 0.6;
+}
+
+.grid {
+  padding: 1.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+figure {
+  margin: 0;
+  max-width: 100%;
+}
+
+figcaption small {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  opacity: 0.6;
+}
+
+figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding-bottom: 0.4rem;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+/* Clips the frame's full layout box down to the component's scaled height. */
+.tile {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.tile[data-state='pending'] {
+  background: var(--code-bg);
+}
+
+.tile[data-state='error'] {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.tile-error {
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--accent);
+}
+
+.tile iframe {
+  display: block;
+  border: 0;
+  /* The page sets `color-scheme: light dark`, which inherits here and makes
+     Chrome paint the frame on an opaque canvas. The preview document is
+     transparent, so reset this to let the tile show through. */
+  color-scheme: normal;
+  /* Scaled, not resized: layout width is untouched, so the component cannot
+     reflow in response and cannot re-report a different size. */
+  transform-origin: top left;
+}

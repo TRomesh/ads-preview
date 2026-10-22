@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/tharaka.hewavitharana/Projects/content-js-sdk/templates/stride && sed -n 1,24p components/blocks/EventCardsList.tsx)",
+      "Read(//Users/tharaka.hewavitharana/Projects/content-js-sdk/templates/stride/**)",
+      "Read(//Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk/src/react/**)",
+      "Bash(cd /Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk *)",
+      "Read(//Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk/**)",
+      "Bash(cd /Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk && npx vitest run src/react/__test__/componentPreview.test.tsx 2>&1 | grep -E \"Tests |Test Files|×|AssertionError|Error:\" | head -12)",
+      "Bash(pnpm build *)",
+      "Read(//Users/tharaka.hewavitharana/templates/**)",
+      "Bash(cd /Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk && npx vitest run src/render/__test__/mockContent.test.ts 2>&1 | grep -A12 \"Failed Tests\" | head -20)",
+      "Bash(cd /Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk && sed -n 40,60p src/render/__test__/mockContent.test.ts; echo \"=== dateTime impl ===\"; grep -n \"dateTime\" -A 2 src/render/mockContent.ts)",
+      "Read(//Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk/src/render/__test__/**)",
+      "Bash(ls /Users/tharaka.hewavitharana/Projects/content-js-sdk/node_modules/.bin 2>/dev/null | grep -i \"playwright\\\\|puppeteer\\\\|chromium\" ; ls ~/.cache/ms-playwright 2>/dev/null | head -3; echo \"---\"; which chromium chrome 2>/dev/null; ls \"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" 2>/dev/null)",
+      "Read(//Users/tharaka.hewavitharana/Projects/content-js-sdk/node_modules/.bin/**)",
+      "Read(//Users/tharaka.hewavitharana/.cache/**)",
+      "Read(//Applications/Google Chrome.app/Contents/MacOS/**)",
+      "Bash(node -I check.mjs \"http://localhost:5174\")",
+      "Bash(node check.mjs \"http://localhost:5174\")",
+      "Bash(node layout.mjs)",
+      "Bash(node loop.mjs)",
+      "Bash(node e2e/protocol-check.mjs http://localhost:5174)",
+      "Bash(pkill -f \"remote-debugging-port=9222\")",
+      "Bash(pkill -f \"next dev\")",
+      "Bash(pkill -f \"vite\")",
+      "Bash(rm -rf /tmp/preview-e2e)",
+      "Bash(cd /Users/tharaka.hewavitharana/Projects/content-js-sdk/specs/003-preview-iframe-protocol *)",
+      "Read(//Users/tharaka.hewavitharana/Projects/content-js-sdk/specs/003-preview-iframe-protocol/**)",
+      "Bash(pkill -f vite)",
+      "Bash(node /tmp/pe/inside.mjs \"https://localhost:3000/preview/component?contentType=ButtonElement&parentOrigin=http://localhost:5174\")",
+      "Bash(node /tmp/pe/who.mjs \"https://localhost:3000/preview/component?contentType=ButtonElement\")",
+      "Bash(node /tmp/pe/control3.mjs)",
+      "Bash(node /tmp/pe/transparency2.mjs http://localhost:5174)"
+    ],
+    "additionalDirectories": [
+      "/Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk/src/core/preview",
+      "/Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk/src/react/__test__",
+      "/Users/tharaka.hewavitharana/Projects/content-js-sdk/packages/optimizely-cms-sdk/src/render/__test__"
+    ]
+  }
+}

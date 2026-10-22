@@ -1,19 +1,22 @@
 /**
- * End-to-end check for the preview protocol
- * (content-js-sdk/specs/003-preview-iframe-protocol).
+ * End-to-end check for the preview protocol.
  *
  * jsdom cannot prove any of this: there is no layout, so a measurement is
- * whatever the test stubs say. This drives a real browser instead and asserts
- * the two properties the design rests on.
+ * whatever the test stubs say. This drives a real browser and asserts the two
+ * properties the design rests on.
  *
- *   1. A preview reports its *component's* box, not the document's.
- *   2. Re-scaling a tile never makes a preview re-report — the feedback loop
- *      the protocol exists to avoid cannot start.
+ *   1. A preview reports its *component's* box, not the page's. Components
+ *      differ in size, and one narrower than the 1280px viewport proves the
+ *      measurement is of the component rather than the wrapper around it.
+ *   2. Nothing keeps talking. After the previews settle, no further protocol
+ *      messages arrive — the parent scales with a CSS transform, so a
+ *      component cannot reflow from being scaled and re-report forever.
  *
  * Needs three things running:
  *
- *   cd content-js-sdk/templates/stride && pnpm dev     # the preview host
- *   cd ads-preview && pnpm dev                         # this app
+ *   cd content-js-sdk/packages/optimizely-cms-sdk && pnpm build
+ *   cd content-js-sdk/templates/stride && pnpm dev
+ *   cd ads-preview && pnpm dev
  *   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
  *     --headless=new --remote-debugging-port=9222 --ignore-certificate-errors \
  *     --user-data-dir=/tmp/preview-e2e about:blank
@@ -24,9 +27,13 @@
 const APP_URL = process.argv[2] ?? 'http://localhost:5173';
 const CDP = 'http://127.0.0.1:9222';
 
+// How long to watch for stray messages once the previews have settled.
+const QUIET_PERIOD = 4000;
+
 const targets = await (await fetch(`${CDP}/json/list`)).json();
 const target = targets.find(t => t.type === 'page');
-if (!target) throw new Error('No Chrome page target. Is Chrome running with --remote-debugging-port=9222?');
+if (!target)
+  throw new Error('No Chrome page target. Is Chrome running with --remote-debugging-port=9222?');
 
 const ws = new WebSocket(target.webSocketDebuggerUrl);
 await new Promise(resolve => (ws.onopen = resolve));
@@ -55,19 +62,6 @@ const evaluate = async expression => {
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-const readReported = () =>
-  evaluate(
-    `JSON.stringify([...document.querySelectorAll('figcaption small')].map(e => e.textContent))`,
-  );
-
-const clickToggle = (group, option) =>
-  evaluate(`(() => {
-    const groups = [...document.querySelectorAll('[role=group]')];
-    const g = groups.find(x => x.getAttribute('aria-label') === '${group}');
-    [...g.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('${option}')).click();
-    return true;
-  })()`);
-
 await send('Page.enable');
 await send('Runtime.enable');
 await send('Security.setIgnoreCertificateErrors', { ignore: true });
@@ -76,7 +70,7 @@ await wait(12000);
 
 const failures = [];
 
-// 1. Components report their own box. A page is 720px tall; a button is not.
+// 1. Each preview reports its own box.
 const tiles = JSON.parse(
   (await evaluate(`JSON.stringify([...document.querySelectorAll('figure')].map(f => ({
     name: f.querySelector('figcaption')?.firstChild?.textContent?.trim(),
@@ -84,65 +78,59 @@ const tiles = JSON.parse(
   })))`)) ?? '[]',
 );
 
-const measured = tiles.filter(t => /^\d+×\d+$/.test(t.status ?? ''));
-if (measured.length === 0) failures.push('No preview reported a measurement at all.');
+const boxes = tiles
+  .filter(tile => /^\d+×\d+$/.test(tile.status ?? ''))
+  .map(tile => {
+    const [width, height] = tile.status.split('×').map(Number);
+    return { name: tile.name, width, height };
+  });
 
-const boxes = measured.map(t => {
-  const [width, height] = t.status.split('×').map(Number);
-  return { name: t.name, width, height };
-});
-
-if (boxes.some(b => b.height >= 720)) {
+if (boxes.length === 0) {
   failures.push(
-    `A preview reported the page height rather than the component: ${JSON.stringify(boxes)}`,
+    'No preview reported a measurement. Is the SDK built, and has the site named this origin?',
   );
 }
-if (new Set(boxes.map(b => b.height)).size < 2) {
+
+// The wrapper around a component is full-width, so a component narrower than
+// the viewport is the proof that the component itself is being measured.
+if (boxes.length > 0 && !boxes.some(box => box.width < 1280)) {
+  failures.push(
+    `Every preview reported the full viewport width, so the wrapper is being measured: ${JSON.stringify(boxes)}`,
+  );
+}
+
+if (boxes.length > 1 && new Set(boxes.map(box => box.height)).size < 2) {
   failures.push('Every preview reported the same height, so the page is being measured.');
 }
-// The wrapper is full-width, so a component narrower than the page proves the
-// measurement is of the component itself rather than the box around it.
-if (!boxes.some(b => b.width < 1280)) {
-  failures.push(
-    `Every preview reported the full page width, so the wrapper is being measured: ${JSON.stringify(boxes)}`,
-  );
-}
 
-// 2. Re-scaling must not re-measure, and must not produce protocol traffic.
+// 2. Nothing keeps talking once things have settled.
 await evaluate(`window.__seen = []; window.addEventListener('message', e => {
   if (typeof e.data?.type === 'string' && e.data.type.startsWith('optimizely:preview:'))
     window.__seen.push(e.data.type);
 }); true`);
 
-const before = await readReported();
-await clickToggle('Tile', 'medium');
-await wait(2500);
-const afterMedium = await readReported();
-await clickToggle('Tile', 'thumbnail');
-await wait(2500);
-const afterThumbnail = await readReported();
-const seen = JSON.parse((await evaluate('JSON.stringify(window.__seen)')) ?? '[]');
+await wait(QUIET_PERIOD);
 
-if (before !== afterMedium || before !== afterThumbnail) {
-  failures.push(
-    `Re-scaling changed the reported dimensions, so the preview is reflowing:\n` +
-      `  before: ${before}\n  medium: ${afterMedium}\n  thumb:  ${afterThumbnail}`,
-  );
-}
+const seen = JSON.parse((await evaluate('JSON.stringify(window.__seen)')) ?? '[]');
 if (seen.length > 0) {
-  failures.push(`Re-scaling produced ${seen.length} protocol messages: ${seen.join(', ')}`);
+  failures.push(
+    `${seen.length} protocol messages arrived after the previews settled: ${seen.join(', ')}`,
+  );
 }
 
 ws.close();
 
 console.log(
-  `measured ${measured.length}/${tiles.length} previews:`,
-  boxes.map(b => `${b.name} ${b.width}×${b.height}`).join(', '),
+  `measured ${boxes.length}/${tiles.length} previews:`,
+  boxes
+    .slice(0, 6)
+    .map(box => `${box.name} ${box.width}×${box.height}`)
+    .join(', '),
 );
-console.log(`re-scale produced ${seen.length} messages, dimensions stable: ${before === afterThumbnail}`);
+console.log(`messages during a ${QUIET_PERIOD}ms quiet period: ${seen.length}`);
 
 if (failures.length) {
-  console.error('\nFAILED\n' + failures.map(f => `  - ${f}`).join('\n'));
+  console.error('\nFAILED\n' + failures.map(failure => `  - ${failure}`).join('\n'));
   process.exit(1);
 }
-console.log('\nPASS: components report their own box, and re-scaling does not re-measure.');
+console.log('\nPASS: components report their own box, and nothing keeps talking.');

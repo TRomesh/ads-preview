@@ -13,48 +13,6 @@ h1 {
   font-size: 1.1rem;
 }
 
-.controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.25rem;
-}
-
-.viewports {
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
-}
-
-.toggle-label {
-  padding-right: 0.25rem;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  opacity: 0.5;
-}
-
-.viewports button {
-  padding: 0.35rem 0.75rem;
-  font: inherit;
-  font-size: 0.85rem;
-  text-transform: capitalize;
-  color: inherit;
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.viewports button[aria-pressed='true'] {
-  color: var(--accent);
-  background: var(--accent-bg);
-  border-color: var(--accent-border);
-}
-
-.viewports small {
-  opacity: 0.6;
-}
-
 .grid {
   padding: 1.5rem;
   display: flex;

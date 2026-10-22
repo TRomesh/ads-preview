@@ -1,14 +1,15 @@
 # Component preview — reference implementation
 
 A small app that embeds component previews served by an Optimizely site, the way the CMS
-will. It exists so the CMS side has something working to copy from rather than a spec to
-interpret.
+will: one fixed tile per component, no modes, nothing to choose. It exists so the CMS side
+has something working to copy from rather than a spec to interpret.
 
 If you are building the CMS side, the short version is:
 
 1. Put an iframe on the page pointing at the site's preview route.
 2. Give that iframe a **fixed** size and scale it with a CSS `transform`.
-3. Listen for one `postMessage` telling you how big the component actually is.
+3. Listen for `postMessage`: one `ready` with the component's size, then `resize` if it
+   changes and `error` if it could not render.
 
 Everything else here is detail around those three steps.
 
@@ -26,11 +27,15 @@ pnpm dev                       # https://localhost:3000
 Open `https://localhost:3000` once in a browser and accept the self-signed certificate, or
 every frame stays blank.
 
+The template consumes the SDK from `dist`, so run `pnpm build` in
+`packages/optimizely-cms-sdk` after changing SDK code or switching branches. A stale build
+shows up as `500` on the preview route and `unmeasured` on every tile.
+
 Then this app:
 
 ```bash
 pnpm install
-pnpm dev                       # http://localhost:5173
+pnpm dev                       # http://localhost:5173, or 5174 if that is taken
 ```
 
 Point it at a different site with `VITE_PREVIEW_ORIGIN=https://my-site.example pnpm dev`.
@@ -118,10 +123,10 @@ and it never settles.
 
 ---
 
-## Desktop only: the whole thing
+## A minimal implementation
 
-You do not need the mobile/tablet switching this app has. For a fixed desktop preview the
-component is about forty lines:
+[src/CmsTiles.tsx](src/CmsTiles.tsx) is the whole view. Stripped of this app's styling,
+a fixed desktop preview is about forty lines:
 
 ```tsx
 import { useEffect, useRef, useState } from 'react'
@@ -174,10 +179,74 @@ function PreviewTile({ contentType, tileWidth }: { contentType: string; tileWidt
 }
 ```
 
-That is enough for a catalogue. The extra machinery in [src/usePreview.ts](src/usePreview.ts)
-handles the cases this skips: a timeout for sites that never report, `resize` for content
-that changes after load, `error` for components that fail to render, and a cap so an
-animating component cannot drive your layout forever. Copy it when you need those.
+**This handles `ready` only.** It is enough to render a catalogue, and deliberately
+skips four things that [src/usePreview.ts](src/usePreview.ts) does handle:
+
+| Skipped here | Why you will want it |
+| --- | --- |
+| A timeout, started on the frame's `load` | A site that never reports leaves the tile stuck on its guessed size, with no way to tell |
+| `resize` | A late web font or lazily decoded image changes the height after `ready` |
+| `error` | A broken component shows an empty tile instead of saying why |
+| A cap on how many resizes to follow | An animating component can otherwise drive your layout indefinitely |
+
+`usePreview` is ~100 lines and does all four. Copy it rather than growing this example.
+
+---
+
+## How the fixed tile works
+
+Every component is shown in one fixed thumbnail, with no viewport switching, so nothing
+ever remounts — the only thing that would have forced it is a change of layout width.
+
+Two numbers, both constants:
+
+```text
+LAYOUT  1280 × 720   the viewport the component is laid out and measured in. Never changes.
+TILE     240 × 135   your thumbnail. Also never changes.
+```
+
+Fit the reported box inside the tile and centre it:
+
+```tsx
+// Never upscale: a 48px button blown up to fill a tile just looks blurry.
+const scale = Math.min(1, TILE.width / box.width, TILE.height / box.height)
+
+const left = (TILE.width - box.width * scale) / 2
+const top = (TILE.height - box.height * scale) / 2
+
+// Right to left: component box to the frame's corner, scale it, then centre.
+const transform =
+  `translate(${left}px, ${top}px) scale(${scale}) ` +
+  `translate(${-box.offsetX}px, ${-box.offsetY}px)`
+```
+
+Before the measurement arrives, `box` is the whole 1280×720 viewport, so the tile shows the
+page scaled down — a reasonable placeholder that sharpens into the component when `ready`
+lands.
+
+### Could you skip the protocol entirely?
+
+Almost. The preview page centres the component in its viewport already, so scaling the
+whole frame by `tileWidth / 1280` gives you a centred, uncropped thumbnail with no
+messages at all.
+
+The catch is scale. That fixed ratio is 0.1875 for a 240px tile, which is right for a hero
+band and useless for a button — it becomes a 48px smudge. The measurement is what lets a
+small component be shown at or near its own size while a large one is scaled to fit. If
+every component you preview is page-sized, blind scaling genuinely is enough.
+
+### What you still need
+
+Even with one tile, keep these from [src/usePreview.ts](src/usePreview.ts):
+
+- **Origin and `event.source` checks.** Unchanged — nothing about tile count affects this.
+- **A timeout on the frame's `load`.** A site that never reports must fall back to the
+  blind scale above rather than showing a placeholder forever.
+- **`error`.** Otherwise a broken component is an empty tile with no explanation.
+
+You can drop `resize` handling and the rescale cap if your tiles are fixed-height: a
+late font changes the component's height, but the tile's height does not follow it, so
+the worst case is slightly stale centring.
 
 ---
 
@@ -226,7 +295,7 @@ anything else as `render-failed`, and render `error.message` as **text, never HT
 | --- | --- |
 | [src/protocol.ts](src/protocol.ts) | Message types and both validators. Written without importing the SDK, deliberately — the same position you are in. |
 | [src/usePreview.ts](src/usePreview.ts) | The full listener: validation, timeout, resize cap, last-good fallback. |
-| [src/App.tsx](src/App.tsx) | Tile rendering and the transform maths. |
+| [src/CmsTiles.tsx](src/CmsTiles.tsx) | The view: one fixed tile per component, and the transform maths. |
 | [src/components.ts](src/components.ts) | Which components to show, and URL building. |
 | [e2e/protocol-check.mjs](e2e/protocol-check.mjs) | Drives headless Chrome and asserts components report their own box and that re-scaling emits nothing. Instructions at the top of the file. |
 

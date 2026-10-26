@@ -2,58 +2,75 @@ import { useEffect, useRef, useState } from 'react'
 import {
   isPreviewMessage,
   isValidDimensions,
-  PREVIEW_MESSAGE_PREFIX,
+  PREVIEW_PROTOCOL_VERSION,
   PreviewMessageType,
   type PreviewDimensions,
 } from './protocol'
 
-// How long to wait before deciding a preview is never going to answer.
-// A site that does not use the SDK sends nothing, and must not hang the tile.
+// Give up waiting after this. A site that does not use the SDK never answers,
+// and the tile must not sit there forever.
 const MEASURE_TIMEOUT = 4000
 
-// A component that animates could report a new size forever. After this many
-// updates, stop listening to it and keep the last size it gave.
+// An animating component could report a new size forever. Follow this many
+// changes, then keep the last size it gave.
 const MAX_UPDATES = 5
 
-// Logs only while developing. A tile that stays blank is otherwise a mystery.
+// Dev only. Without it, a blank tile has no explanation.
 const log = (...args: unknown[]) => {
   if (import.meta.env.DEV) console.debug('[preview]', ...args)
 }
 
 export type PreviewState = {
-  /** The component's size, once it has said. Undefined until then. */
+  /** The component's size. Undefined until the preview reports it. */
   dimensions?: PreviewDimensions
-  /** The preview could not render this component. */
+  /** Set when the preview could not render the component. */
   error?: string
-  /** Nothing arrived in time. Probably a site that does not use the SDK. */
+  /** Nothing arrived in time. Usually a site that does not use the SDK. */
   timedOut: boolean
-  /** Put this on the iframe. It starts the timeout. */
+  /** Pass to the iframe's `onLoad`. Starts the timeout. */
   onLoad: () => void
+  /**
+   * Ask the preview to measure itself again. Call it after you resize the
+   * frame: the preview only watches its own box, so a frame that changed
+   * height, or a fixed-size component recentred by a width change, reports
+   * nothing on its own.
+   */
+  remeasure: () => void
 }
 
 /**
  * Listens to one preview iframe.
  *
- * You do not need this to lay the tile out: the preview fits itself to its own
- * frame, so a fixed frame scaled by a constant is enough. What you get here is
- * the component's size for display, plus the two things worth reacting to —
- * it failed, or it never answered.
+ * The preview fits itself to its frame, so you do not need this to lay the
+ * tile out. What it adds is the component's size, plus the two things you do
+ * have to react to: it failed, or it never answered.
  */
 export function usePreview(
   frame: React.RefObject<HTMLIFrameElement | null>,
   { origin }: { origin: string },
 ): PreviewState {
-  const [state, setState] = useState<Omit<PreviewState, 'onLoad'>>({
-    timedOut: false,
-  })
+  const [state, setState] = useState<
+    Omit<PreviewState, 'onLoad' | 'remeasure'>
+  >({ timedOut: false })
 
-  // Counted for the life of the preview, not per render.
-  const updates = useRef(0)
+  // Refs, not state: these change without anything needing to re-render.
+  const updates = useRef(0) // how many changes we have followed
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const asked = useRef(false) // a reply we requested is on its way
+  const measured = useRef(false) // the first measurement has arrived
 
-  // Started when the iframe loads, not when the tile mounts: a lazy iframe
-  // below the fold is not fetched until you scroll to it, and would otherwise
-  // be declared dead while it is simply waiting its turn.
+  const remeasure = () => {
+    asked.current = true
+    log('→ measure', origin)
+    frame.current?.contentWindow?.postMessage(
+      { type: PreviewMessageType.measure, version: PREVIEW_PROTOCOL_VERSION },
+      origin,
+    )
+  }
+
+  // Start the clock when the iframe loads, not when the tile mounts. A lazy
+  // iframe below the fold is not fetched until you scroll to it, and would
+  // otherwise be called dead while it is only waiting its turn.
   const onLoad = () => {
     clearTimeout(timer.current)
     timer.current = setTimeout(() => {
@@ -66,14 +83,14 @@ export function usePreview(
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
-      // Every library shares this channel, so ignore anything not ours.
+      // Every library on the page shares this channel. Ignore what is not ours.
       if (!isPreviewMessage(event.data)) return
 
-      // Ours, but from another tile's iframe. Each tile sees every message,
-      // so this is normal and not worth logging.
+      // Ours, but from another tile's iframe. Every tile sees every message,
+      // so this is normal — not worth logging.
       if (event.source !== frame.current?.contentWindow) return
 
-      // Ours, claiming to be this iframe, but from an unexpected site.
+      // Claims to be our frame, but came from somewhere else.
       if (event.origin !== origin) {
         log('rejected: from', event.origin, 'expected', origin)
         return
@@ -83,28 +100,37 @@ export function usePreview(
 
       if (message.type === PreviewMessageType.error) {
         clearTimeout(timer.current)
-        log('error', message.payload?.code)
+        log('← error', message.payload?.code)
         // Untrusted text. Keep it a string and render it as text, never HTML.
         setState({ error: String(message.payload?.message ?? ''), timedOut: false })
         return
       }
 
-      // A size change after the first report. Stop following it eventually.
-      if (message.type === PreviewMessageType.resize) {
-        if (updates.current >= MAX_UPDATES) return
-        updates.current++
+      // One message type covers both cases, so which one this is comes from
+      // what has already arrived. The first means the component is ready.
+      // Later ones mean it changed, and we follow only a few of those.
+      if (measured.current) {
+        // A reply we asked for is not the animation the cap guards against.
+        if (asked.current) asked.current = false
+        else if (updates.current >= MAX_UPDATES) {
+          // Say so. A tile that stopped following a component looks exactly
+          // like one whose component stopped reporting.
+          log('← update ignored: past', MAX_UPDATES, 'updates')
+          return
+        } else updates.current++
       }
 
-      // Never trust the numbers: a broken component can report anything.
+      // Never trust the numbers. A broken component can report anything.
       if (!isValidDimensions(message.payload)) {
         log('rejected: bad size', message.payload)
         return
       }
 
-      const { width, height, contentType } = message.payload
-      const kind = message.type.replace(PREVIEW_MESSAGE_PREFIX, '')
-      log(`${kind} ${contentType} ${width}×${height}`)
+      const { width, height, offsetX, offsetY, contentType } = message.payload
+      const kind = measured.current ? 'update' : 'first'
+      log(`← ${kind} ${contentType} ${width}×${height} @ ${offsetX},${offsetY}`)
 
+      measured.current = true
       clearTimeout(timer.current)
       setState({ dimensions: message.payload, timedOut: false })
     }
@@ -116,5 +142,5 @@ export function usePreview(
     }
   }, [frame, origin])
 
-  return { ...state, onLoad }
+  return { ...state, onLoad, remeasure }
 }

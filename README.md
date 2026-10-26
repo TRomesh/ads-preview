@@ -8,8 +8,9 @@ If you are building the CMS side, the short version is:
 
 1. Put an iframe on the page pointing at the site's preview route.
 2. Give that iframe a **fixed** size and scale it with a CSS `transform`.
-3. Listen for `postMessage`: one `ready` with the component's size, then `resize` if it
-   changes and `error` if it could not render.
+3. Listen for `postMessage`: `dimensions` carries the component's size — the first one
+   means it has settled, later ones mean it changed — and `error` means it could not
+   render.
 
 Everything else here is detail around those three steps.
 
@@ -99,7 +100,7 @@ the page, a button is 257×48. So the preview measures itself and tells you.
        │                                  wait for fonts and images
        │                                  measure the component's box
        │                                          │
-       │◀── optimizely:preview:ready ─────────────┘
+       │◀── optimizely:preview:dimensions ──────────┘
        │    { width: 257, height: 48,
        │      offsetX: 511, offsetY: 336 }
        │
@@ -136,12 +137,21 @@ because you scaled it, and so cannot report a new size. If you resize the frame 
 responsive component crossing a breakpoint reports a different height, you resize again,
 and it never settles.
 
+Resizing a frame for your own reasons — a panel dragged, a grid reflowed — is fine. That
+is not a response to a message, so there is no loop to close. Send `measure` afterwards.
+
 ---
 
 ## A minimal implementation
 
-[src/CmsTiles.tsx](src/CmsTiles.tsx) is the whole view. Stripped of this app's styling,
-a fixed desktop preview is about forty lines:
+About forty lines, and it does something [src/CmsTiles.tsx](src/CmsTiles.tsx)
+deliberately does not: it **crops to the component**. The reported box and offsets move
+the component into the tile's corner, and each component gets its own scale.
+
+This app takes the simpler route instead — one frame, one constant scale, offsets
+ignored — because at a frame only twice the tile's width every component already fills
+most of the tile. Use the version below when your components differ a lot in size, or
+when the frame is wide enough that a blind ratio would shrink a button to nothing.
 
 ```tsx
 import { useEffect, useRef, useState } from 'react'
@@ -158,7 +168,7 @@ function PreviewTile({ contentType, tileWidth }: { contentType: string; tileWidt
     function onMessage(event: MessageEvent) {
       if (event.origin !== new URL(SITE).origin) return          // which site
       if (event.source !== frame.current?.contentWindow) return  // which frame
-      if (event.data?.type !== 'optimizely:preview:ready') return
+      if (event.data?.type !== 'optimizely:preview:dimensions') return
 
       const { width, height, offsetX, offsetY } = event.data.payload
       if (!Number.isFinite(width) || width <= 0 || width > 20000) return
@@ -194,26 +204,42 @@ function PreviewTile({ contentType, tileWidth }: { contentType: string; tileWidt
 }
 ```
 
-**This handles `ready` only.** It is enough to render a catalogue, and deliberately
-skips four things that [src/usePreview.ts](src/usePreview.ts) does handle:
+**This handles sizes and nothing else.** It takes every `dimensions` message as it
+comes, which is enough to render a catalogue, and deliberately skips three things that
+[src/usePreview.ts](src/usePreview.ts) does handle:
 
 | Skipped here | Why you will want it |
 | --- | --- |
-| A timeout, started on the frame's `load` | A site that never reports leaves the tile stuck on its guessed size, with no way to tell |
-| `resize` | A late web font or lazily decoded image changes the height after `ready` |
+| A timeout, started on the frame's `load` | A site that never answers leaves the tile stuck on its guessed size, with no way to tell |
 | `error` | A broken component shows an empty tile instead of saying why |
-| A cap on how many resizes to follow | An animating component can otherwise drive your layout indefinitely |
+| A cap on how many updates to follow | An animating component can otherwise drive your layout forever |
 
-`usePreview` is ~100 lines and does all four. Copy it rather than growing this example.
+`usePreview` is ~100 lines and does all three. Copy it rather than growing this example.
+
+**This snippet is checked, not just written down.**
+[e2e/snippet/index.html](e2e/snippet/index.html) is it transcribed to plain DOM, and
+`node e2e/snippet-check.mjs` measures where the component lands against a real site.
+Last run, against a 320-wide frame:
+
+```text
+ButtonElement      box 257×48   scale 0.665   component fills the tile exactly
+HeadingElement     box 304×76   scale 0.563   component fills the tile exactly
+ImageCardElement   box 304×303  scale 0.563   component fills the tile exactly
+```
+
+Three different scales for three components — that is what cropping buys you, and what
+a single blind ratio cannot do.
 
 ---
 
-## How the fixed tile works
+## How cropping to the component works
 
 Every component is shown in one fixed thumbnail, with no viewport switching, so nothing
 ever remounts — the only thing that would have forced it is a change of layout width.
 
-Two numbers, both constants:
+Two numbers, both constants. These are the snippet's; this app uses a frame of
+342.78 × 192.81 for a tile of 171.39 × 96.41, which is the same idea with the frame
+shaped like the tile:
 
 ```text
 LAYOUT   320 × 1600  the viewport the component is laid out and measured in. Never changes.
@@ -235,31 +261,20 @@ const transform =
   `translate(${-box.offsetX}px, ${-box.offsetY}px)`
 ```
 
-Before the measurement arrives, `box` is the whole 1280×720 viewport, so the tile shows the
-page scaled down — a reasonable placeholder that sharpens into the component when `ready`
-lands.
-
-### Could you skip the protocol entirely?
-
-Almost. The preview page centres the component in its viewport already, so scaling the
-whole frame by `tileWidth / 1280` gives you a centred, uncropped thumbnail with no
-messages at all.
-
-The catch is scale. That fixed ratio is 0.1875 for a 240px tile, which is right for a hero
-band and useless for a button — it becomes a 48px smudge. The measurement is what lets a
-small component be shown at or near its own size while a large one is scaled to fit. If
-every component you preview is page-sized, blind scaling genuinely is enough.
+Before the first measurement arrives, `box` is a guess — the frame's width and some
+plausible height — so the tile shows the top of the frame scaled down. A reasonable
+placeholder, and it snaps to the component when the measurement lands.
 
 ### What you still need
 
 Even with one tile, keep these from [src/usePreview.ts](src/usePreview.ts):
 
 - **Origin and `event.source` checks.** Unchanged — nothing about tile count affects this.
-- **A timeout on the frame's `load`.** A site that never reports must fall back to the
-  blind scale above rather than showing a placeholder forever.
+- **A timeout on the frame's `load`.** A site that never reports must fall back to a
+  fixed scale rather than showing a placeholder forever.
 - **`error`.** Otherwise a broken component is an empty tile with no explanation.
 
-You can drop `resize` handling and the rescale cap if your tiles are fixed-height: a
+You can drop later measurements and the rescale cap if your tiles are fixed-height: a
 late font changes the component's height, but the tile's height does not follow it, so
 the worst case is slightly stale centring.
 
@@ -267,13 +282,80 @@ the worst case is slightly stale centring.
 
 ## Messages
 
-All are child → parent. You never send anything.
+Two you receive, one you send.
 
-| Type | When | Payload |
-| --- | --- | --- |
-| `optimizely:preview:ready` | Once, after fonts and images settle | `width`, `height`, `offsetX`, `offsetY`, `viewportWidth`, `element`, `contentType` |
-| `optimizely:preview:resize` | Size changed by ≥8px after `ready` | Same, plus `previousHeight` |
-| `optimizely:preview:error` | Could not render | `code`, `message`, `contentType` |
+| Type | Direction | When | Payload |
+| --- | --- | --- | --- |
+| `optimizely:preview:dimensions` | child → parent | Once after fonts and images settle, then again whenever the box moves by ≥8px | `width`, `height`, `offsetX`, `offsetY`, `contentType` |
+| `optimizely:preview:error` | child → parent | Could not render | `code`, `message`, `contentType` |
+| `optimizely:preview:measure` | parent → child | You changed the frame's size | None |
+
+**There is no separate `ready`.** The first `dimensions` is the readiness signal — it means
+fonts have loaded, images have decoded and the layout has settled, which is what a
+screenshot tool waits for. Every later one is a change. The parent does not need to be
+told which is which: it is the first if nothing has arrived yet, and the payload is
+identical either way, so there was nothing for two message types to carry.
+
+### Watching the traffic
+
+Both sides log every message while developing, and an iframe's console output lands in
+the same console as the page's. In Chrome devtools, **turn the Verbose level on** — these
+are `console.debug`, and the default filter hides them.
+
+```text
+[optimizely] preview → optimizely:preview:dimensions {width: 257, …}   the frame, sending
+[preview] ← first ButtonElement 257×48 @ 43,72                         this app, receiving
+[preview] → measure https://localhost:3000                             this app, asking
+[optimizely] preview ← optimizely:preview:measure                      the frame, asked
+[optimizely] preview → optimizely:preview:dimensions {…}               the frame, answering
+```
+
+Also logged, because each is otherwise an unexplained silence:
+
+- `[optimizely] preview ✕ measure from <origin>` — the request came from an origin the
+  site does not list in `parentOrigin`.
+- `[preview] rejected: from <origin>` — a message arrived claiming to be this frame, from
+  the wrong site.
+- `[preview] rejected: bad size` — the numbers failed validation.
+- `[preview] ← update ignored: past 5 updates` — the tile has stopped following this
+  component.
+- `[preview] nothing reported after 4000 ms` — the timeout fired.
+
+A message from another tile's frame is dropped without a log. Every tile sees every
+message, so logging those would be one line per tile per message.
+
+Nothing in a tile grid ever resizes a frame, so there is no parent → child traffic to
+watch by default. To see a full round trip, ask for one from the console:
+
+```js
+document.querySelectorAll('.tile iframe').forEach(f =>
+  f.contentWindow.postMessage(
+    { type: 'optimizely:preview:measure', version: 1 }, 'https://localhost:3000'))
+```
+
+Those replies count against the five-update cap, because `usePreview` only exempts the
+ones it asked for itself — so after a few pokes the tiles stop following. Reload to
+reset. `node e2e/protocol-check.mjs` checks the same round trip unattended.
+
+### When you resize a frame, say so
+
+A preview watches its own box and refits itself when that box changes, which covers a
+late font or a component that reflows. Two things it cannot see:
+
+- **A frame that only changed height.** The component's box is unchanged, so nothing
+  fires — and the preview stays fitted to a frame that no longer exists.
+- **A fixed-size component in a frame that changed width.** A 150px button is still
+  150px; what moved is where it sits. Crop to the old `offsetX` and you frame the
+  wrong region.
+
+So post `{ type: 'optimizely:preview:measure', version: 1 }` to the frame's
+`contentWindow` after you resize it, with the site's origin as `targetOrigin`. You get a
+`dimensions` back whether or not anything moved. `remeasure()` from
+[src/usePreview.ts](src/usePreview.ts) does this, and exempts the reply from the update
+cap — an answer you asked for is not the animation that cap guards against.
+
+The preview only accepts requests from the origins the site already lists in
+`parentOrigin`. An embedder cannot name itself in either direction.
 
 Every message carries `version: 1` and a `optimizely:preview:` prefix. Ignore types and
 fields you do not recognise — that is how this stays compatible as the SDK and the CMS ship
@@ -284,15 +366,53 @@ anything else as `render-failed`, and render `error.message` as **text, never HT
 
 ---
 
+## Which of this you actually need
+
+Not every surface needs every message. Two, with different answers:
+
+**A catalogue of tiles** — browsing components, fixed thumbnails, nothing resizes.
+
+- `error` is the one that earns its place. A component that cannot preview says so
+  instead of being an empty box.
+- The first `dimensions` gates the skeleton, so no tile shows a half-painted component —
+  and it is what a screenshot tool waits on before capturing.
+- The measurement gives each component its own scale instead of one shared ratio. Weigh
+  that against what it does to a grid: scaled to fit, a button looks as prominent as a
+  hero band.
+- Later measurements and `measure` buy you little here. Tiles are fixed, and a tile that visibly
+  re-jiggles after load reads as broken. Following a handful of updates and then stopping
+  is the right amount of effort.
+
+**A component inspector** — one component, a panel, a breakpoint toggle or a draggable
+frame.
+
+- This is where the frame genuinely changes size, and where all of it matters.
+- `fit: 'none'`, so the component renders at its real size and the panel scrolls.
+- Send `measure` after every size change. Without it the alternative is reloading the
+  frame on each toggle, which flashes and refetches.
+- The breakpoint toggle only works because the frame's own size *is* the viewport inside
+  it. Nothing the preview does internally can simulate a breakpoint — only the embedder
+  can, by resizing the frame.
+
+**Before scaling a catalogue up**, price the alternative. Every tile is a full page load
+of the site: twenty components is twenty server renders, and a real instance has far more
+content types than that. Rendering thumbnails once server-side and caching the images is
+an order of magnitude cheaper and never jiggles. Live frames earn their cost when the
+preview has to track settings an editor is changing right now — which is the inspector,
+not the catalogue.
+
+---
+
 ## Four things that will cost you an afternoon
 
 1. **A white tile is probably your own CSS.** The preview document is transparent, but
    `color-scheme: light dark` on your `:root` inherits to the `<iframe>` element and makes
    the browser paint it on an opaque canvas. Set `color-scheme: normal` on the iframe.
 
-2. **`ready` fires once per document load.** If you ever change the frame's layout width,
-   reload it — remount the element or change `src`. A component that is the same height at
-   both widths sends no `resize`, so it would sit on its old measurement forever.
+2. **The settled signal fires once per document load.** If you change the frame's layout width, ask
+   for a measurement afterwards — the component reflows by itself, but one that lands at
+   the same size sends nothing, and you would sit on its old measurement forever. A
+   reload works too, at the cost of a flash.
 
 3. **Start any timeout on the frame's `load` event, not on mount.** With `loading="lazy"`,
    a frame below the fold has not been fetched yet and would otherwise be declared dead
@@ -309,10 +429,11 @@ anything else as `render-failed`, and render `error.message` as **text, never HT
 | Path | |
 | --- | --- |
 | [src/protocol.ts](src/protocol.ts) | Message types and both validators. Written without importing the SDK, deliberately — the same position you are in. |
-| [src/usePreview.ts](src/usePreview.ts) | The full listener: validation, timeout, resize cap, last-good fallback. |
-| [src/CmsTiles.tsx](src/CmsTiles.tsx) | The view: one fixed tile per component, and the transform maths. |
+| [src/usePreview.ts](src/usePreview.ts) | The full listener: validation, timeout, update cap, last-good fallback. |
+| [src/CmsTiles.tsx](src/CmsTiles.tsx) | The view: one fixed tile per component, scaled by one constant. |
 | [src/components.ts](src/components.ts) | Which components to show, and URL building. |
-| [e2e/protocol-check.mjs](e2e/protocol-check.mjs) | Drives headless Chrome and asserts components report their own box and that re-scaling emits nothing. Instructions at the top of the file. |
+| [e2e/protocol-check.mjs](e2e/protocol-check.mjs) | Drives headless Chrome and asserts components report their own box, that nothing keeps talking, and that a `measure` request is answered once. Instructions at the top of the file. |
+| [e2e/snippet/](e2e/snippet/) + [e2e/snippet-check.mjs](e2e/snippet-check.mjs) | The README's minimal implementation, runnable, and a check that it frames the component exactly. |
 
 The list in `src/components.ts` is maintained by hand, standing in for the catalogue the
 CMS already holds after `optimizely-cms-cli config push`. In the CMS you would drive the

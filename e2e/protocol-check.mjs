@@ -11,6 +11,9 @@
  *   2. Nothing keeps talking. After the previews settle, no further protocol
  *      messages arrive — the parent scales with a CSS transform, so a
  *      component cannot reflow from being scaled and re-report forever.
+ *   3. A measure request is answered, exactly once. This is the only message
+ *      that travels parent → child, and the only way an embedder that resized
+ *      a frame can get a fresh measurement out of it.
  *
  * Needs three things running:
  *
@@ -133,6 +136,34 @@ if (seen.length > 0) {
   );
 }
 
+// 3. A measure request is answered. The embedder is the only one that knows it
+// resized a frame, and a preview that ignores the request leaves it scaled to a
+// frame that no longer exists.
+const answered = await evaluate(`(async () => {
+  const frame = document.querySelector('.tile iframe');
+  if (!frame) return 'no frame on the page';
+
+  const origin = new URL(frame.src).origin;
+  const answers = [];
+  const listener = event => {
+    if (event.source === frame.contentWindow &&
+        event.data?.type === 'optimizely:preview:dimensions') answers.push(event.data.payload);
+  };
+  addEventListener('message', listener);
+
+  frame.contentWindow.postMessage(
+    { type: 'optimizely:preview:measure', version: 1 }, origin,
+  );
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  removeEventListener('message', listener);
+
+  return answers.length === 1 ? 'ok'
+    : answers.length === 0 ? 'no answer to a measure request'
+    : answers.length + ' answers to one measure request';
+})()`);
+
+if (answered !== 'ok') failures.push(`measure request: ${answered}`);
+
 ws.close();
 
 console.log(
@@ -143,6 +174,7 @@ console.log(
     .join(', '),
 );
 console.log(`messages during a ${QUIET_PERIOD}ms quiet period: ${seen.length}`);
+console.log(`measure request: ${answered}`);
 
 if (failures.length) {
   console.error('\nFAILED\n' + failures.map(failure => `  - ${failure}`).join('\n'));

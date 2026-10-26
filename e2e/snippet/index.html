@@ -1,0 +1,87 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>README snippet check</title>
+<style>body { margin: 20px; font: 14px system-ui }</style>
+
+<!--
+  The README's "minimal implementation", transcribed to plain DOM so it can be
+  run without a build. Same constants, same maths, same transform string.
+-->
+<div id="tile" style="overflow: hidden"></div>
+
+<script>
+  const LAYOUT_WIDTH = 320
+  const LAYOUT_HEIGHT = 1600
+  const SITE = 'https://localhost:3000'
+  const TILE_WIDTH = 171
+  const CONTENT_TYPE = new URLSearchParams(location.search).get('c') ?? 'ButtonElement'
+
+  const tile = document.getElementById('tile')
+  const frame = document.createElement('iframe')
+
+  let box = { width: LAYOUT_WIDTH, height: 720, offsetX: 0, offsetY: 0 }
+
+  function render() {
+    const scale = Math.min(1, TILE_WIDTH / box.width)
+
+    tile.style.width = TILE_WIDTH + 'px'
+    tile.style.height = box.height * scale + 'px'
+
+    frame.style.border = '0'
+    frame.style.colorScheme = 'normal'
+    frame.style.transformOrigin = 'top left'
+    frame.style.transform =
+      `scale(${scale}) translate(${-box.offsetX}px, ${-box.offsetY}px)`
+
+    window.__state = { box, scale, tileWidth: TILE_WIDTH }
+  }
+
+  window.addEventListener('message', event => {
+    if (event.origin !== new URL(SITE).origin) return
+    if (event.source !== frame.contentWindow) return
+    if (event.data?.type !== 'optimizely:preview:dimensions') return
+
+    const { width, height, offsetX, offsetY } = event.data.payload
+    if (!Number.isFinite(width) || width <= 0 || width > 20000) return
+    if (!Number.isFinite(height) || height <= 0 || height > 20000) return
+
+    box = { width, height, offsetX, offsetY }
+    render()
+  })
+
+  frame.src = `${SITE}/preview/component?contentType=${CONTENT_TYPE}`
+  frame.setAttribute('width', LAYOUT_WIDTH)
+  frame.setAttribute('height', LAYOUT_HEIGHT)
+  render()
+  tile.append(frame)
+
+  /**
+   * Where the component actually lands on the page, versus where the tile is.
+   * If the snippet's maths is right these coincide: the component's box is
+   * moved to the frame's corner and then scaled, so it should fill the tile
+   * from its top-left corner.
+   */
+  window.__check = () => {
+    const tileRect = tile.getBoundingClientRect()
+    const frameRect = frame.getBoundingClientRect()
+    const { box, scale } = window.__state
+
+    const component = {
+      left: frameRect.left + box.offsetX * scale,
+      top: frameRect.top + box.offsetY * scale,
+      width: box.width * scale,
+      height: box.height * scale,
+    }
+
+    return {
+      box,
+      scale,
+      tile: { left: tileRect.left, top: tileRect.top, width: tileRect.width, height: tileRect.height },
+      component,
+      dx: Math.round(component.left - tileRect.left),
+      dy: Math.round(component.top - tileRect.top),
+      widthGap: Math.round(tileRect.width - component.width),
+      heightGap: Math.round(tileRect.height - component.height),
+    }
+  }
+</script>

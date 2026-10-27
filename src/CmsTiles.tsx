@@ -85,6 +85,7 @@ export function CmsTiles() {
     <>
       <header>
         <h1>Component tiles</h1>
+        <a href='?lab'>resize lab →</a>
       </header>
 
       <main className='grid'>

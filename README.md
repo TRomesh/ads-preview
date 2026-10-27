@@ -325,17 +325,27 @@ A message from another tile's frame is dropped without a log. Every tile sees ev
 message, so logging those would be one line per tile per message.
 
 Nothing in a tile grid ever resizes a frame, so there is no parent → child traffic to
-watch by default. To see a full round trip, ask for one from the console:
+watch there. **Open [`?lab`](?lab) instead** — the resize lab is one frame you can drag
+to any size, with a log of everything the preview says about it. Drag the sliders,
+press **Send measure**, and watch which changes the preview reports on its own.
 
-```js
-document.querySelectorAll('.tile iframe').forEach(f =>
-  f.contentWindow.postMessage(
-    { type: 'optimizely:preview:measure', version: 1 }, 'https://localhost:3000'))
+What you will see, dragging a `HeadingElement`:
+
+```text
+dimensions  327×77 @ 8,51     the first one: it has settled
+width 343 → 700
+dimensions  684×40 @ 8,69     the component reflowed at the new width
+height 193 → 900
+dimensions  684×40 @ 8,423    same size, centred lower — offsets moved
+height 900 → 902
+(silence)                     under 8px is jitter, not a resize
+→ measure
+dimensions  684×40 @ 8,424    asking always gets an answer
 ```
 
-Those replies count against the five-update cap, because `usePreview` only exempts the
-ones it asked for itself — so after a few pokes the tiles stop following. Reload to
-reset. `node e2e/protocol-check.mjs` checks the same round trip unattended.
+The lab listens to the raw messages rather than going through `usePreview`, so nothing
+is filtered — you see the updates the cap would have dropped too.
+`node e2e/resize-check.mjs` drives the same page and asserts all four behaviours.
 
 ### When you resize a frame, say so
 
@@ -433,7 +443,9 @@ not the catalogue.
 | [src/CmsTiles.tsx](src/CmsTiles.tsx) | The view: one fixed tile per component, scaled by one constant. |
 | [src/components.ts](src/components.ts) | Which components to show, and URL building. |
 | [e2e/protocol-check.mjs](e2e/protocol-check.mjs) | Drives headless Chrome and asserts components report their own box, that nothing keeps talking, and that a `measure` request is answered once. Instructions at the top of the file. |
+| [src/ResizeLab.tsx](src/ResizeLab.tsx) | Second page, at `?lab`: one frame you can drag to any size, and a log of everything the preview says about it. |
 | [e2e/snippet/](e2e/snippet/) + [e2e/snippet-check.mjs](e2e/snippet-check.mjs) | The README's minimal implementation, runnable, and a check that it frames the component exactly. |
+| [e2e/resize-check.mjs](e2e/resize-check.mjs) | Drives the resize lab and asserts what a resized frame reports, what it ignores, and that drags coalesce. |
 
 The list in `src/components.ts` is maintained by hand, standing in for the catalogue the
 CMS already holds after `optimizely-cms-cli config push`. In the CMS you would drive the

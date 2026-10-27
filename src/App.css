@@ -92,3 +92,61 @@ figcaption {
      reflow in response and cannot re-report a different size. */
   transform-origin: top left;
 }
+
+/* The resize lab: a frame you can drag to any size, beside a log of what the
+   preview says about it. */
+.lab {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  padding: 1.5rem;
+}
+
+.lab-controls {
+  flex: none;
+  width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lab-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.lab-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.lab-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.lab-log {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  min-height: 12rem;
+  max-height: 55vh;
+  overflow: auto;
+}
+
+/* `flex: none`, or the row squeezes the frame and its width attribute stops
+   meaning anything. */
+.lab-frame {
+  flex: none;
+  border: 1px dashed var(--border);
+  /* Components expect a light page; the preview document is transparent. */
+  background: #fff;
+  color-scheme: normal;
+}
